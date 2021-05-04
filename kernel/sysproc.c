@@ -95,3 +95,35 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_trace(void)
+{
+    int n;
+    if( argint(0, &n) < 0 ) 
+        return -1;
+    myproc()->mask = n;
+    return 0;
+}
+
+#include "defs.h"
+#include "sysinfo.h"
+uint64
+sys_sysinfo(void)
+{
+    struct sysinfo info;
+    uint64 addr;
+
+    // 获取user-space传入的sysinfo结构体
+    if( argaddr(0, &addr) < 0 )
+        return -1;
+    struct proc* p = myproc();
+    info.freemem = memory_unused();     // 自己实现的函数
+    info.nproc = proc_not_unused();     // 自己实现的函数
+
+    // 将kernel-space的info复制到user-space
+    if( copyout(p->pagetable, addr, (char*)&info, sizeof(info)) < 0 )
+        return -1;
+    return 0;
+}
+

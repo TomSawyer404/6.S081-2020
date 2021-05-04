@@ -295,6 +295,9 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  // labs: syscall
+  np->mask = p->mask;
+
   release(&np->lock);
 
   return pid;
@@ -692,4 +695,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64
+proc_not_unused(void)
+{
+    int num_not_unused = 0;
+    for(int i = 0; i < NPROC; i++) {
+        if( proc[i].state != UNUSED )
+            num_not_unused++;
+    }
+    return num_not_unused;
 }
