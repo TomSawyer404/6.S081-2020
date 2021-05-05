@@ -22,6 +22,31 @@ trapinit(void)
   initlock(&tickslock, "time");
 }
 
+int 
+cowfault(pagetable_t pagetable, uint64 va)
+{
+    // No crazy address
+    if( va >= MAXVA )   return -1;
+
+    pte_t* pte = walk(pagetable, va, 0);
+    if( 0 == pte )   return -1;
+    if( 0 == (*pte & PTE_U) || 0 == (*pte & PTE_V) )
+        return -1;
+
+    // ALloc a new page
+    uint64 pa_new = (uint64)kalloc();
+    if( 0 == pa_new ) {
+        printf("cow kalloc failed!\n");
+        return -1;
+    }
+    uint64 pa_transferee = PTE2PA(*pte);
+    memmove((void*)pa_new, (void*)pa_transferee, 4096);
+
+    kfree((void*)pa_transferee);
+    *pte = PA2PTE(pa_new) | PTE_V | PTE_U | PTE_R | PTE_W | PTE_X;
+    return 0;
+}
+
 // set up to take exceptions and traps while in the kernel.
 void
 trapinithart(void)
@@ -67,7 +92,10 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if( r_scause() == 0xf ) {  // page fault
+    if( cowfault(p->pagetable, r_stval()) < 0 )
+        p->killed = 0x1;
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
