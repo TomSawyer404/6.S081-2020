@@ -40,6 +40,7 @@ procinit(void)
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+      p->kstackpa = (uint64)pa;
   }
   kvminithart();
 }
@@ -121,6 +122,18 @@ found:
     return 0;
   }
 
+  // labs: pgtbl
+  pagetable_t proc_kpt_init(void);  // in vm.c
+  p->my_kern_pgtbl = proc_kpt_init();
+  if( 0 == p->my_kern_pgtbl ) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  void uvmmap(pagetable_t pt, uint64 va, uint64 pa, uint64 sz, int perm); // in vm.c
+  uvmmap(p->my_kern_pgtbl, (uint64)p->kstack, (uint64)p->kstackpa, PGSIZE, PTE_R | PTE_W);
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -141,6 +154,10 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->my_kern_pgtbl) {
+    void proc_kpt_destroy(pagetable_t);  // in vm.c
+    proc_kpt_destroy(p->my_kern_pgtbl);
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -221,6 +238,9 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  // labs: pgtbl3
+  kvmcopy(p->pagetable, p->my_kern_pgtbl, 0, p->sz);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -246,6 +266,8 @@ growproc(int n)
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if( kvmcopy(p->pagetable, p->my_kern_pgtbl, sz-n, sz) != 0 )
+        return -1;
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -289,6 +311,13 @@ fork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  // labs: pgtbl3
+  if( kvmcopy(np->pagetable, np->my_kern_pgtbl, 0, p->sz) < 0 ) {
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -473,7 +502,13 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        
+        w_satp(MAKE_SATP(p->my_kern_pgtbl));
+        sfence_vma();
+
+
         swtch(&c->context, &p->context);
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

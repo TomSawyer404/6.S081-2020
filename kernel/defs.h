@@ -158,6 +158,7 @@ void            uartputc_sync(int);
 int             uartgetc(void);
 
 // vm.c
+int kvmcopy(pagetable_t, pagetable_t, uint64, uint64);
 void            kvminit(void);
 void            kvminithart(void);
 uint64          kvmpa(uint64);
@@ -223,3 +224,7 @@ int             sockread(struct sock *, uint64, int);
 int             sockwrite(struct sock *, uint64, int);
 void            sockrecvudp(struct mbuf*, uint32, uint16, uint16);
 #endif
+
+// vmcopuin.c
+int copyin_new(pagetable_t pagetable, char* dst, uint64 srcva, uint64 len);
+int copyinstr_new(pagetable_t pagetable, char* dst, uint64 srcva, uint64 max);
