@@ -401,6 +401,35 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  // My indirect blocks allocation
+  bn -= NINDIRECT;
+  struct buf* buff_level1;
+  struct buf* buff_level2;
+  if( bn < LEVEL2DIRECT ) {
+    // Load level-1 indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    
+    buff_level1 = bread(ip->dev, addr);
+    a = (uint*)buff_level1->data;
+    if( a[bn / NINDIRECT] == 0 ){
+      // Load level-2 indirect block, allocating if necessary.
+      a[bn / NINDIRECT] = balloc(ip->dev);
+      log_write(buff_level1);
+    }
+    
+    // Read level-2 block
+    buff_level2 = bread(ip->dev, a[bn / NINDIRECT]);
+    a = (uint*)buff_level2->data;
+    if( a[bn % NINDIRECT] == 0 ) {
+      a[bn % NINDIRECT] = balloc(ip->dev);
+      log_write(buff_level2);
+    }
+    brelse(buff_level1);
+    brelse(buff_level2);
+    return a[bn % NINDIRECT];
+  }
+
   panic("bmap: out of range");
 }
 
@@ -430,6 +459,31 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if( ip->addrs[NDIRECT+1] ) {
+    struct buf* buff_level1;
+    struct buf* buff_level2;
+
+    buff_level1 = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    uint* a = (uint*)buff_level1->data;
+    for(i = 0; i < NINDIRECT; i++) {
+      if( a[i] ) {
+        buff_level2 = bread(ip->dev, a[i]);
+        uint* a_lev2 = (uint*)buff_level2->data;
+
+        for(j = 0; j < NINDIRECT; j++) {
+          if( a_lev2[j] ) {
+            bfree(ip->dev, a_lev2[j]);
+            a_lev2[j] = 0;
+          }
+        }
+        brelse(buff_level2);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(buff_level1);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
   }
 
   ip->size = 0;
